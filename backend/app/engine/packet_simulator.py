@@ -26,7 +26,15 @@ class PacketTrace:
     is_video: np.ndarray
     sizes: np.ndarray
     is_lost: np.ndarray
-    is_recovered: np.ndarray = field(default_factory=lambda: np.array([]))
+    is_recovered: Optional[np.ndarray] = None
+
+    def has_recovery(self) -> bool:
+        return self.is_recovered is not None and len(self.is_recovered) == len(self.is_lost)
+
+    def get_recovered_safe(self) -> np.ndarray:
+        if self.has_recovery():
+            return self.is_recovered
+        return np.zeros_like(self.is_lost, dtype=bool)
 
     def to_dataframe(self) -> pd.DataFrame:
         df = pd.DataFrame({
@@ -36,7 +44,7 @@ class PacketTrace:
             'size_bytes': self.sizes,
             'is_lost': self.is_lost,
         })
-        if len(self.is_recovered) > 0:
+        if self.has_recovery():
             df['is_recovered'] = self.is_recovered
         return df
 

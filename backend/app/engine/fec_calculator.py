@@ -93,18 +93,19 @@ class FECForwardErrorCorrection:
         return recovered_trace, self.fec_config
 
     def calculate_effective_loss_rate(self, trace: PacketTrace) -> dict:
-        total_lost = np.sum(trace.is_lost)
+        total_lost = int(np.sum(trace.is_lost))
         total_packets = len(trace.is_lost)
-        total_recovered = np.sum(trace.is_recovered) if len(trace.is_recovered) > 0 else 0
+        recovered = trace.get_recovered_safe()
+        total_recovered = int(np.sum(recovered))
         remaining_lost = total_lost - total_recovered
 
         v_mask = trace.is_video
         a_mask = ~v_mask
 
-        video_lost = np.sum(trace.is_lost[v_mask])
-        video_recovered = np.sum(trace.is_recovered[v_mask]) if len(trace.is_recovered) > 0 else 0
-        audio_lost = np.sum(trace.is_lost[a_mask])
-        audio_recovered = np.sum(trace.is_recovered[a_mask]) if len(trace.is_recovered) > 0 else 0
+        video_lost = int(np.sum(trace.is_lost[v_mask]))
+        video_recovered = int(np.sum(recovered[v_mask]))
+        audio_lost = int(np.sum(trace.is_lost[a_mask]))
+        audio_recovered = int(np.sum(recovered[a_mask]))
 
         return {
             "total_packets": int(total_packets),

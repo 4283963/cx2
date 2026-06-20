@@ -33,12 +33,13 @@ class MetricsCalculator:
         cfg = self.sim_config
         duration = cfg.simulation_duration_sec
         window_sec = window_ms / 1000.0
-        num_windows = int(np.ceil(duration / window_sec))
+        num_windows = max(1, int(np.ceil(duration / window_sec)))
         window_edges = np.arange(num_windows + 1) * window_sec
         window_centers = (window_edges[:-1] + window_edges[1:]) / 2
 
-        if use_fec and len(trace.is_recovered) > 0:
-            effective_mask = ~trace.is_lost | trace.is_recovered
+        recovered = trace.get_recovered_safe()
+        if use_fec:
+            effective_mask = ~trace.is_lost | recovered
         else:
             effective_mask = ~trace.is_lost
 
@@ -46,12 +47,18 @@ class MetricsCalculator:
         a_mask = ~trace.is_video & effective_mask
 
         def _bin_bitrate(timestamps, sizes):
-            if len(timestamps) == 0:
-                return np.zeros(num_windows)
+            result = np.zeros(num_windows, dtype=np.float64)
+            if len(timestamps) == 0 or len(sizes) == 0:
+                return result
             bin_indices = np.digitize(timestamps, window_edges) - 1
             bin_indices = np.clip(bin_indices, 0, num_windows - 1)
-            binned = np.bincount(bin_indices, weights=sizes, minlength=num_windows)
-            return (binned * 8) / window_sec
+            binned = np.bincount(
+                bin_indices.astype(np.int64),
+                weights=np.asarray(sizes, dtype=np.float64),
+                minlength=num_windows,
+            )
+            result[:] = binned[:num_windows]
+            return (result * 8.0) / window_sec
 
         video_bitrate = _bin_bitrate(trace.timestamps[v_mask], trace.sizes[v_mask])
         audio_bitrate = _bin_bitrate(trace.timestamps[a_mask], trace.sizes[a_mask])
@@ -63,12 +70,12 @@ class MetricsCalculator:
         raw_audio_bitrate = _bin_bitrate(trace.timestamps[raw_a_mask], trace.sizes[raw_a_mask])
         raw_total_bitrate = raw_video_bitrate + raw_audio_bitrate
 
-        ideal_video_bitrate = np.full(num_windows, cfg.video_bitrate_bps)
-        ideal_audio_bitrate = np.full(num_windows, cfg.audio_bitrate_bps)
+        ideal_video_bitrate = np.full(num_windows, float(cfg.video_bitrate_bps), dtype=np.float64)
+        ideal_audio_bitrate = np.full(num_windows, float(cfg.audio_bitrate_bps), dtype=np.float64)
         ideal_total_bitrate = ideal_video_bitrate + ideal_audio_bitrate
 
         df = pd.DataFrame({
-            "time_sec": window_centers,
+            "time_sec": window_centers.astype(np.float64),
             "video_bitrate_bps": video_bitrate,
             "audio_bitrate_bps": audio_bitrate,
             "total_bitrate_bps": total_bitrate,
@@ -101,21 +108,15 @@ class MetricsCalculator:
         base_latency_ms = 20.0
         jitter_base_ms = 5.0
 
-        if len(trace.is_recovered) > 0:
-            recovered_packets = trace.is_recovered
-            num_recovered = int(np.sum(recovered_packets))
-            recovery_delay_ms = ((self.fec_config.fec_ratio_n - 1) * 1000.0 / cfg.video_fps)
-            extra_latency = np.where(recovered_packets, recovery_delay_ms, 0)
-        else:
-            num_recovered = 0
-            extra_latency = np.zeros_like(trace.timestamps)
+        recovered = trace.get_recovered_safe()
+        num_recovered = int(np.sum(recovered))
+        recovery_delay_ms = ((self.fec_config.fec_ratio_n - 1) * 1000.0 / cfg.video_fps)
+        extra_latency = np.where(recovered, recovery_delay_ms, 0.0)
 
-        lost_mask = trace.is_lost
-        if len(trace.is_recovered) > 0:
-            lost_mask = trace.is_lost & ~trace.is_recovered
+        lost_mask = trace.is_lost & ~recovered
 
         retransmit_delay_ms = 80.0
-        retransmit_latency = np.where(lost_mask, retransmit_delay_ms, 0)
+        retransmit_latency = np.where(lost_mask, retransmit_delay_ms, 0.0)
 
         total_packets = len(trace.timestamps)
         random_jitter = np.random.normal(0, jitter_base_ms, total_packets)
@@ -130,10 +131,8 @@ class MetricsCalculator:
     def calculate_effective_fps(self, trace: PacketTrace) -> float:
         cfg = self.sim_config
         v_mask = trace.is_video
-        if len(trace.is_recovered) > 0:
-            effective_mask = ~trace.is_lost | trace.is_recovered
-        else:
-            effective_mask = ~trace.is_lost
+        recovered = trace.get_recovered_safe()
+        effective_mask = ~trace.is_lost | recovered
         effective_video_packets = np.sum(v_mask & effective_mask)
         total_video_packets = np.sum(v_mask)
         if total_video_packets == 0:
