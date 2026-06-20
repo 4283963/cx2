@@ -78,6 +78,60 @@ export default function ControlPanel({ params, setParams, onRun, loading }) {
       <div className="section-label">网络丢包参数</div>
 
       <div className="form-group">
+        <label className="form-label">网络场景模式</label>
+        <select
+          className="form-select"
+          value={params.network_profile}
+          onChange={e => handleChange('network_profile', e.target.value)}
+        >
+          <option value="NORMAL">🟢 正常网络（随机丢包）</option>
+          <option value="TUNNEL">🚇 隧道/电梯突变模式（连续完全阻断）</option>
+        </select>
+      </div>
+
+      {params.network_profile === 'TUNNEL' && (
+        <div style={{
+          padding: '12px 14px',
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          fontSize: '12px',
+          color: '#fca5a5',
+        }}>
+          ⚠️ 模拟进入隧道/电梯时的网络突变：在仿真时长中段强制连续多个时间窗口 100% 丢包，测试 FEC 抗完全阻断能力
+        </div>
+      )}
+
+      {params.network_profile === 'TUNNEL' && (
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">阻断窗口数</label>
+            <input
+              type="number"
+              className="form-input"
+              min="1"
+              max="30"
+              value={params.blockage_window_count}
+              onChange={e => handleChange('blockage_window_count', parseInt(e.target.value) || 1)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">单窗口时长(ms)</label>
+            <input
+              type="number"
+              className="form-input"
+              min="100"
+              max="5000"
+              step="100"
+              value={params.blockage_window_ms}
+              onChange={e => handleChange('blockage_window_ms', parseInt(e.target.value) || 500)}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="form-group">
         <label className="form-label">平均丢包率 (%)</label>
         <div className="form-slider-row">
           <input

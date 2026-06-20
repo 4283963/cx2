@@ -17,6 +17,9 @@ const DEFAULT_PARAMS = {
   fec_ratio_k: 4,
   fec_ratio_n: 5,
   random_seed: 42,
+  network_profile: 'NORMAL',
+  blockage_window_count: 5,
+  blockage_window_ms: 500,
 };
 
 export default function App() {
@@ -80,7 +83,10 @@ export default function App() {
                 recoveryStats={result.recovery_stats}
                 qosMetrics={result.qos_metrics}
               />
-              <BitrateChart bitrateSeries={result.bitrate_series} />
+              <BitrateChart
+                bitrateSeries={result.bitrate_series}
+                blockageEvents={result.blockage_events}
+              />
             </div>
           )}
         </div>

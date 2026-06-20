@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -23,9 +23,108 @@ ChartJS.register(
   Filler
 );
 
-function buildChartOptions(title, yLabel) {
+function createBlockagePlugin(bitrateSeries, blockageEvents) {
+  const timeValues = bitrateSeries.map(p => p.time_sec);
+  const numPoints = timeValues.length;
+  const xIndexOf = (t) => {
+    let lo = 0, hi = numPoints - 1, ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (timeValues[mid] <= t) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return ans;
+  };
+
+  return {
+    id: 'blockageOverlay',
+    beforeDatasetsDraw(chart) {
+      if (!blockageEvents || blockageEvents.length === 0) return;
+      const { ctx, chartArea: area, scales: { x, y } } = chart;
+      if (!area) return;
+
+      ctx.save();
+
+      blockageEvents.forEach((ev, idx) => {
+        const xLeft = x.getPixelForValue(xIndexOf(ev.start_time_sec));
+        const xRight = x.getPixelForValue(xIndexOf(ev.end_time_sec));
+        const drawLeft = Math.max(area.left, xLeft);
+        const drawRight = Math.min(area.right, xRight);
+        const drawWidth = Math.max(1, drawRight - drawLeft);
+
+        const gradient = ctx.createLinearGradient(drawLeft, area.top, drawLeft, area.bottom);
+        gradient.addColorStop(0, 'rgba(239, 68, 68, 0.05)');
+        gradient.addColorStop(0.5, 'rgba(239, 68, 68, 0.20)');
+        gradient.addColorStop(1, 'rgba(239, 68, 68, 0.05)');
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(drawLeft, area.top, drawWidth, area.bottom - area.top);
+
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(drawLeft, area.top);
+        ctx.lineTo(drawLeft, area.bottom);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(drawRight, area.top);
+        ctx.lineTo(drawRight, area.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (idx === 0 || Math.abs(ev.start_time_sec - blockageEvents[idx - 1].end_time_sec) > 0.15) {
+          const label = '🚫 网络彻底阻断';
+          ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, sans-serif';
+          const labelMetrics = ctx.measureText(label);
+          const labelW = labelMetrics.width + 20;
+          const labelH = 24;
+          const centerX = (drawLeft + drawRight) / 2;
+          const labelX = Math.max(area.left + 4, Math.min(area.right - labelW - 4, centerX - labelW / 2));
+          const labelY = area.top + 10;
+
+          ctx.fillStyle = 'rgba(127, 29, 29, 0.92)';
+          ctx.beginPath();
+          const r = 6;
+          ctx.moveTo(labelX + r, labelY);
+          ctx.lineTo(labelX + labelW - r, labelY);
+          ctx.quadraticCurveTo(labelX + labelW, labelY, labelX + labelW, labelY + r);
+          ctx.lineTo(labelX + labelW, labelY + labelH - r);
+          ctx.quadraticCurveTo(labelX + labelW, labelY + labelH, labelX + labelW - r, labelY + labelH);
+          ctx.lineTo(labelX + r, labelY + labelH);
+          ctx.quadraticCurveTo(labelX, labelY + labelH, labelX, labelY + labelH - r);
+          ctx.lineTo(labelX, labelY + r);
+          ctx.quadraticCurveTo(labelX, labelY, labelX + r, labelY);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = 'rgba(248, 113, 113, 0.9)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = '#fecaca';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, labelX + labelW / 2, labelY + labelH / 2);
+          ctx.textAlign = 'start';
+          ctx.textBaseline = 'alphabetic';
+        }
+      });
+
+      ctx.restore();
+    },
+  };
+}
+
+function buildChartOptions(title, yLabel, bitrateSeries, blockageEvents) {
+  const timeValues = bitrateSeries.map(p => p.time_sec);
+  const plugin = blockageEvents && blockageEvents.length > 0
+    ? [createBlockagePlugin(bitrateSeries, blockageEvents)]
+    : [];
+
   return {
     responsive: true,
+    maintainAspectRatio: true,
     interaction: {
       mode: 'index',
       intersect: false,
@@ -55,6 +154,9 @@ function buildChartOptions(title, yLabel) {
     },
     scales: {
       x: {
+        type: 'linear',
+        min: timeValues[0],
+        max: timeValues[timeValues.length - 1],
         title: {
           display: true,
           text: '时间 (秒)',
@@ -64,6 +166,7 @@ function buildChartOptions(title, yLabel) {
         ticks: {
           color: '#64748b',
           maxTicksLimit: 10,
+          callback: (v) => Number(v).toFixed(1),
         },
         grid: {
           color: 'rgba(100, 116, 139, 0.1)',
@@ -79,8 +182,8 @@ function buildChartOptions(title, yLabel) {
         ticks: {
           color: '#64748b',
           callback: function (value) {
-            if (value >= 1000000) return (value / 1000000).toFixed(1) + ' Mbps';
-            if (value >= 1000) return (value / 1000).toFixed(0) + ' kbps';
+            if (value >= 1) return value.toFixed(1) + ' Mbps';
+            if (value >= 0.001) return (value * 1000).toFixed(0) + ' kbps';
             return value + ' bps';
           },
         },
@@ -89,22 +192,20 @@ function buildChartOptions(title, yLabel) {
         },
       },
     },
+    _plugins: plugin,
   };
 }
 
 function bpsToMbps(series, key) {
-  return series.map(p => p[key] / 1000000);
+  return series.map(p => ({ x: p.time_sec, y: p[key] / 1000000 }));
 }
 
-export default function BitrateChart({ bitrateSeries }) {
+export default function BitrateChart({ bitrateSeries, blockageEvents }) {
   if (!bitrateSeries || bitrateSeries.length === 0) {
     return null;
   }
 
-  const labels = bitrateSeries.map(p => p.time_sec.toFixed(1));
-
-  const totalData = {
-    labels,
+  const totalData = useMemo(() => ({
     datasets: [
       {
         label: '理想码率',
@@ -137,10 +238,9 @@ export default function BitrateChart({ bitrateSeries }) {
         fill: true,
       },
     ],
-  };
+  }), [bitrateSeries]);
 
-  const videoData = {
-    labels,
+  const videoData = useMemo(() => ({
     datasets: [
       {
         label: '理想视频码率',
@@ -170,10 +270,9 @@ export default function BitrateChart({ bitrateSeries }) {
         fill: true,
       },
     ],
-  };
+  }), [bitrateSeries]);
 
-  const audioData = {
-    labels,
+  const audioData = useMemo(() => ({
     datasets: [
       {
         label: '理想音频码率',
@@ -203,27 +302,51 @@ export default function BitrateChart({ bitrateSeries }) {
         fill: true,
       },
     ],
-  };
+  }), [bitrateSeries]);
 
-  const totalOptions = buildChartOptions('总码率对比', '总码率');
-  const videoOptions = buildChartOptions('视频码率对比', '视频码率');
-  const audioOptions = buildChartOptions('音频码率对比', '音频码率');
+  const totalOpts = useMemo(() => {
+    const opts = buildChartOptions('总码率对比', '总码率', bitrateSeries, blockageEvents);
+    const plugins = opts._plugins || [];
+    delete opts._plugins;
+    return { ...opts, plugins: { ...opts.plugins, _local: plugins } };
+  }, [bitrateSeries, blockageEvents]);
+
+  const videoOpts = useMemo(() => {
+    const opts = buildChartOptions('视频码率对比', '视频码率', bitrateSeries, blockageEvents);
+    const plugins = opts._plugins || [];
+    delete opts._plugins;
+    return { ...opts, plugins: { ...opts.plugins, _local: plugins } };
+  }, [bitrateSeries, blockageEvents]);
+
+  const audioOpts = useMemo(() => {
+    const opts = buildChartOptions('音频码率对比', '音频码率', bitrateSeries, blockageEvents);
+    const plugins = opts._plugins || [];
+    delete opts._plugins;
+    return { ...opts, plugins: { ...opts.plugins, _local: plugins } };
+  }, [bitrateSeries, blockageEvents]);
+
+  const totalPlugins = totalOpts.plugins._local || [];
+  const videoPlugins = videoOpts.plugins._local || [];
+  const audioPlugins = audioOpts.plugins._local || [];
+  delete totalOpts.plugins._local;
+  delete videoOpts.plugins._local;
+  delete audioOpts.plugins._local;
 
   return (
     <>
       <div className="chart-container">
         <h3>📊 总码率曲线对比 (补偿前后)</h3>
-        <Line data={totalData} options={totalOptions} height={100} />
+        <Line data={totalData} options={totalOpts} plugins={totalPlugins} height={100} />
       </div>
 
       <div className="chart-container">
         <h3>🎬 视频码率曲线对比</h3>
-        <Line data={videoData} options={videoOptions} height={80} />
+        <Line data={videoData} options={videoOpts} plugins={videoPlugins} height={80} />
       </div>
 
       <div className="chart-container">
         <h3>🎵 音频码率曲线对比</h3>
-        <Line data={audioData} options={audioOptions} height={80} />
+        <Line data={audioData} options={audioOpts} plugins={audioPlugins} height={80} />
       </div>
     </>
   );

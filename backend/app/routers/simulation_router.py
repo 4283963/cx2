@@ -1,5 +1,8 @@
 from fastapi import APIRouter
-from ..models.schemas import SimulationRequest, SimulationResponse, RecoveryStats, QoSMetricsData, BitratePoint
+from ..models.schemas import (
+    SimulationRequest, SimulationResponse, RecoveryStats,
+    QoSMetricsData, BitratePoint, NetworkBlockageEvent,
+)
 from ..engine.packet_simulator import NetworkSimConfig, PacketLossSimulator
 from ..engine.fec_calculator import FECConfig, FECForwardErrorCorrection
 from ..engine.metrics_calculator import MetricsCalculator
@@ -25,10 +28,13 @@ async def run_simulation(request: SimulationRequest):
         video_bitrate_bps=request.video_bitrate_bps,
         audio_bitrate_bps=request.audio_bitrate_bps,
         random_seed=request.random_seed,
+        network_profile=request.network_profile,
+        blockage_window_count=request.blockage_window_count,
+        blockage_window_ms=request.blockage_window_ms,
     )
 
     simulator = PacketLossSimulator(sim_config)
-    raw_trace = simulator.simulate()
+    raw_trace, blockage_events = simulator.simulate()
 
     fec_config = FECConfig(
         fec_type=request.fec_type,
@@ -99,9 +105,21 @@ async def run_simulation(request: SimulationRequest):
             )
         )
 
+    blockage_event_list = [
+        NetworkBlockageEvent(
+            event_id=ev.event_id,
+            start_time_sec=float(ev.start_time_sec),
+            end_time_sec=float(ev.end_time_sec),
+            duration_sec=float(ev.duration_sec),
+            description=ev.description,
+        )
+        for ev in blockage_events
+    ]
+
     return SimulationResponse(
         request=request,
         recovery_stats=recovery_stats,
         qos_metrics=qos_metrics,
         bitrate_series=bitrate_series,
+        blockage_events=blockage_event_list,
     )

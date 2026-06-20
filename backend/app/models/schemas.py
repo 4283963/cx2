@@ -2,6 +2,14 @@ from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 
 
+class NetworkBlockageEvent(BaseModel):
+    event_id: int
+    start_time_sec: float
+    end_time_sec: float
+    duration_sec: float
+    description: str = "网络彻底阻断 - 隧道/电梯模式"
+
+
 class SimulationRequest(BaseModel):
     video_fps: int = Field(default=30, ge=1, le=120, description="视频帧率 (FPS)")
     audio_sample_rate: int = Field(default=48000, ge=8000, le=192000, description="音频采样率 (Hz)")
@@ -15,6 +23,9 @@ class SimulationRequest(BaseModel):
     fec_ratio_k: int = Field(default=4, ge=1, le=20, description="FEC K值 (数据块数量)")
     fec_ratio_n: int = Field(default=5, ge=2, le=30, description="FEC N值 (总块数量，必须>K)")
     random_seed: Optional[int] = Field(default=42, description="随机种子，用于结果复现")
+    network_profile: str = Field(default="NORMAL", description="网络场景: NORMAL(正常), TUNNEL(隧道/电梯突变模式)")
+    blockage_window_count: int = Field(default=5, ge=1, le=50, description="突变模式下连续完全丢包的时间窗口数量")
+    blockage_window_ms: int = Field(default=500, ge=100, le=5000, description="每个阻断时间窗口长度(ms)")
 
 
 class RecoveryStats(BaseModel):
@@ -62,3 +73,4 @@ class SimulationResponse(BaseModel):
     recovery_stats: RecoveryStats
     qos_metrics: QoSMetricsData
     bitrate_series: List[BitratePoint]
+    blockage_events: List[NetworkBlockageEvent]
